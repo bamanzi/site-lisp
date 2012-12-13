@@ -164,7 +164,8 @@
 (require 'outline)
 (eval-when-compile
   (require 'cl))
-(require 'showtip)
+(or (require 'popup nil t)
+    (require 'showtip nil t))
 
 ;;; Code:
 
@@ -356,9 +357,13 @@ The result will be displayed in buffer named with
     (setq buffer-read-only nil)
     (erase-buffer)
     (let* ((process
-            (start-process
-             "sdcv" sdcv-buffer-name "sdcv"
-             (sdcv-search-witch-dictionary word sdcv-dictionary-complete-list))))
+            (start-process-shell-command
+             "sdcv" sdcv-buffer-name
+             (format "sdcv -n %s %s"
+                     (mapconcat (lambda (dict)
+                         (concat "-u '" dict "'"))
+                      sdcv-dictionary-complete-list " ")
+                     word))))
       (set-process-sentinel
        process
        (lambda (process signal)
@@ -369,8 +374,10 @@ The result will be displayed in buffer named with
 
 (defun sdcv-search-simple (&optional word)
   "Search WORD simple translate result."
-  (showtip
-   (sdcv-search-witch-dictionary word sdcv-dictionary-simple-list)))
+  (let ((result (sdcv-search-witch-dictionary word sdcv-dictionary-simple-list)))
+    (if (fboundp 'popup-tip)
+        (popup-tip result)
+      (showtip result))))
 
 (defun sdcv-search-witch-dictionary (word dictionary-list)
   "Search some WORD with dictionary list.
