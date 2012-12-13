@@ -3,7 +3,5 @@ syntax: glob
 *.elc
 *.pyc
 *.pyo
-*.*~
-*.*#
 *.bak
 Thumb.db
