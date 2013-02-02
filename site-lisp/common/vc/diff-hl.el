@@ -52,7 +52,7 @@
 (require 'vc)
 (require 'vc-dir)
 (eval-when-compile
-  (require 'cl-lib)
+  (require 'cl)
   (require 'vc-git)
   (require 'vc-hg)
   (require 'face-remap))
@@ -89,7 +89,7 @@
 
 (defun diff-hl-define-bitmaps ()
   (let* ((scale (if (and (boundp 'text-scale-mode-amount)
-                         (cl-plusp text-scale-mode-amount))
+                         (plusp text-scale-mode-amount))
                     (expt text-scale-mode-step text-scale-mode-amount)
                   1))
          (h (round (* (frame-char-height) scale)))
@@ -135,7 +135,7 @@
   (let* ((file buffer-file-name)
          (backend (vc-backend file)))
     (when backend
-      (cl-case (vc-state file backend)
+      (case (vc-state file backend)
         (edited
          (let* ((buf-name " *diff-hl* ")
                 res)
@@ -158,7 +158,7 @@
                                       (t 'change))))
                      (when (eq type 'delete)
                        (setq len 1)
-                       (cl-incf line))
+                       (incf line))
                      (push (list line len type) res))))))
            (nreverse res)))
         (added
@@ -173,7 +173,7 @@
     (save-excursion
       (goto-char (point-min))
       (dolist (c changes)
-        (cl-destructuring-bind (line len type) c
+        (destructuring-bind (line len type) c
           (forward-line (- line current-line))
           (let ((hunk-beg (point)))
             (forward-line len)
@@ -243,10 +243,10 @@ in the source file, or the last line of the hunk above it."
               ;; Retreat to the previous hunk.
               (forward-line -1)
             (let ((to-go (1+ (- line hunk-line))))
-              (while (cl-plusp to-go)
+              (while (plusp to-go)
                 (forward-line 1)
                 (unless (looking-at "^-")
-                  (cl-decf to-go))))))))))
+                  (decf to-go))))))))))
 
 (defun diff-hl-revert-hunk ()
   "Revert the diff hunk with changes at or above the point."
@@ -283,7 +283,7 @@ in the source file, or the last line of the hunk above it."
                     (recenter (/ (+ wbh (- beg-line end-line) 2) 2))
                   (recenter 1)))
               (unless (yes-or-no-p (format "Revert current hunk in %s?"
-                                           ,(cl-caadr fileset)))
+                                           ,(caadr fileset)))
                 (error "Revert canceled"))
               (let ((diff-advance-after-apply-hunk nil))
                 (diff-apply-hunk t))
@@ -293,7 +293,7 @@ in the source file, or the last line of the hunk above it."
       (quit-windows-on diff-buffer))))
 
 (defun diff-hl-hunk-overlay-at (pos)
-  (cl-loop for o in (overlays-at pos)
+  (loop for o in (overlays-at pos)
            when (overlay-get o 'diff-hl)
            return o))
 
@@ -346,7 +346,7 @@ in the source file, or the last line of the hunk above it."
 
 (when (require 'smartrep nil t)
   (let (smart-keys)
-    (cl-labels ((scan (map)
+    (labels ((scan (map)
                       (map-keymap
                        (lambda (event binding)
                          (if (consp binding)
@@ -385,8 +385,10 @@ in the source file, or the last line of the hunk above it."
       (diff-hl-dir-mode 1)))))
 
 ;;;###autoload
+;;(define-globalized-minor-mode global-diff-hl-mode diff-hl-mode
+;;  turn-on-diff-hl-mode :after-hook (diff-hl-global-mode-change))
 (define-globalized-minor-mode global-diff-hl-mode diff-hl-mode
-  turn-on-diff-hl-mode :after-hook (diff-hl-global-mode-change))
+  turn-on-diff-hl-mode)
 
 (defun diff-hl-global-mode-change ()
   (unless global-diff-hl-mode
