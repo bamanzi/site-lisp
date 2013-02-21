@@ -67,6 +67,28 @@
   (interactive)
   (projectile-eshell-cd default-directory))
 
+(defun projectile-ack ()
+  "Use `ack' to grep text across source files."
+  (interactive)
+  (unless (fboundp 'ack)
+    (or (require 'ack)
+        (require 'ack-and-a-half)))
+  (let ((default-directory (projectile-get-project-root)))
+    (call-interactively 'ack)))
+
+(defun projectile-grin ()
+  "Use `grin' to grep text across source files."
+  (interactive)
+  (require 'grin)
+  (let ((default-directory (projectile-get-project-root)))
+    (call-interactively 'grin)))
+
+(defun projectile-grind ()
+  "Use `grind' to find file by name."
+  (interactive)
+  (require 'grin)
+  (let ((default-directory (projectile-get-project-root)))
+    (call-interactively 'grind)))
 
 (easy-menu-define projectile-mode-menu projectile-mode-map
   "Menu for Projectile mode"
@@ -74,11 +96,15 @@
     ["Find file" (if (fboundp 'projectile-find-file)
                      (projectile-find-file)
                    (projectile-jump-to-project-file))]
+    ["Find file (ack)" projectile-ack]
+    ["Find file (grind)" projectile-grind]
     ["Switch buffer" projectile-switch-to-buffer]
     "--"
-    ["Find in project" (if (fboundp 'projectile-grep)
+    ["Grep in project" (if (fboundp 'projectile-grep)
                            (projectile-grep)
                          (projectile-grep-in-project))]
+    ["Grep in project (ack)"  projectile-ack]
+    ["Grep in project (grin)"  projectile-grin]
     ["Replace in project" (if (fboundp 'projectile-replace)
                               (projectile-replace)
                             (projectile-replace-in-project))]
