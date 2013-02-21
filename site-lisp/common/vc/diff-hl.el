@@ -4,7 +4,7 @@
 ;; URL:      https://github.com/dgutov/diff-hl
 ;; Keywords: vc, diff
 ;; Version:  1.4.0
-;; Package-Requires: ((cl-lib "0.2"))
+;; Package-Requires: ((cl "0.2"))
 
 ;; This file is not part of GNU Emacs.
 
@@ -135,36 +135,40 @@
   (let* ((file buffer-file-name)
          (backend (vc-backend file)))
     (when backend
-      (case (vc-state file backend)
-        (edited
-         (let* ((buf-name " *diff-hl* ")
-                res)
-           (diff-hl-with-diff-switches
-            (vc-call-backend backend 'diff (list file) nil nil buf-name))
-           (with-current-buffer buf-name
-             (goto-char (point-min))
-             (unless (eobp)
-               (diff-beginning-of-hunk t)
-               (while (looking-at diff-hunk-header-re-unified)
-                 (let ((line (string-to-number (match-string 3)))
-                       (len (let ((m (match-string 4)))
-                              (if m (string-to-number m) 1)))
-                       (beg (point)))
-                   (diff-end-of-hunk)
-                   (let* ((inserts (diff-count-matches "^\\+" beg (point)))
-                          (deletes (diff-count-matches "^-" beg (point)))
-                          (type (cond ((zerop deletes) 'insert)
-                                      ((zerop inserts) 'delete)
-                                      (t 'change))))
-                     (when (eq type 'delete)
-                       (setq len 1)
-                       (incf line))
-                     (push (list line len type) res))))))
-           (nreverse res)))
-        (added
-         `((1 ,(line-number-at-pos (point-max)) insert)))
-        (removed
-         `((1 ,(line-number-at-pos (point-max)) delete)))))))
+      (let ((state (vc-state file backend)))
+        (cond
+         ((or (eq state 'edited)
+              (and (eq state 'up-to-date)
+                   ;; VC state is stale in after-revert-hook.
+                   revert-buffer-in-progress-p))
+          (let* ((buf-name " *diff-hl* ")
+                 res)
+            (diff-hl-with-diff-switches
+             (vc-call-backend backend 'diff (list file) nil nil buf-name))
+            (with-current-buffer buf-name
+              (goto-char (point-min))
+              (unless (eobp)
+                (diff-beginning-of-hunk t)
+                (while (looking-at diff-hunk-header-re-unified)
+                  (let ((line (string-to-number (match-string 3)))
+                        (len (let ((m (match-string 4)))
+                               (if m (string-to-number m) 1)))
+                        (beg (point)))
+                    (diff-end-of-hunk)
+                    (let* ((inserts (diff-count-matches "^\\+" beg (point)))
+                           (deletes (diff-count-matches "^-" beg (point)))
+                           (type (cond ((zerop deletes) 'insert)
+                                       ((zerop inserts) 'delete)
+                                       (t 'change))))
+                      (when (eq type 'delete)
+                        (setq len 1)
+                        (incf line))
+                      (push (list line len type) res))))))
+            (nreverse res)))
+         ((eq state 'added)
+          `((1 ,(line-number-at-pos (point-max)) insert)))
+         ((eq state 'removed)
+          `((1 ,(line-number-at-pos (point-max)) delete))))))))
 
 (defun diff-hl-update ()
   (let ((changes (diff-hl-changes))
@@ -293,7 +297,7 @@ in the source file, or the last line of the hunk above it."
       (quit-windows-on diff-buffer))))
 
 (defun diff-hl-hunk-overlay-at (pos)
-  (loop for o in (overlays-at pos)
+  (loop for o in (overlays-in pos (1+ pos))
            when (overlay-get o 'diff-hl)
            return o))
 
@@ -308,8 +312,8 @@ in the source file, or the last line of the hunk above it."
                                 (next-overlay-change (point))))
                    (let ((o (diff-hl-hunk-overlay-at (point))))
                      (when (and o (if backward
-                                      (<= (overlay-end o) (1+ (point)))
-                                    (>= (overlay-start o) (point))))
+                                      (>= (overlay-end o) (point))
+                                    (<= (overlay-start o) (point))))
                        (throw 'found (overlay-start o)))))))))
     (if pos
         (goto-char pos)
@@ -328,6 +332,10 @@ in the source file, or the last line of the hunk above it."
                         (,(kbd "C-x v ]") . diff-hl-next-hunk))
   (if diff-hl-mode
       (progn
+        (when (window-system) ;; No fringes in the console.
+          (unless (fringe-bitmap-p 'diff-hl-bmp-empty)
+            (diff-hl-define-bitmaps)
+            (define-fringe-bitmap 'diff-hl-bmp-empty [0] 1 1 'center)))
         (add-hook 'after-save-hook 'diff-hl-update nil t)
         (add-hook 'after-change-functions 'diff-hl-edit nil t)
         (if vc-mode
@@ -377,12 +385,11 @@ in the source file, or the last line of the hunk above it."
 ;;;###autoload
 (defun turn-on-diff-hl-mode ()
   "Turn on `diff-hl-mode' or `diff-hl-dir-mode' in a buffer if appropriate."
-  (when (window-system) ;; No fringes in the console.
-    (cond
-     (buffer-file-name
-      (diff-hl-mode 1))
-     ((eq major-mode 'vc-dir-mode)
-      (diff-hl-dir-mode 1)))))
+  (cond
+   (buffer-file-name
+    (diff-hl-mode 1))
+   ((eq major-mode 'vc-dir-mode)
+    (diff-hl-dir-mode 1))))
 
 ;;;###autoload
 ;;(define-globalized-minor-mode global-diff-hl-mode diff-hl-mode
