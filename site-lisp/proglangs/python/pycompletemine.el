@@ -57,7 +57,7 @@
       (goto-char (point-min))
       (setq imports nil)
       (while (re-search-forward
-	      "\\(import \\|from \\([A-Za-z_\\.][A-Za-z_0-9\\.]*\\) import \\).*"
+	      "^[\t ]*\\(import \\|from \\([A-Za-z_\\.][A-Za-z_0-9\\.]*\\) import \\).*"
 	      nil t)
 	(setq imports (append imports
 			      (list (buffer-substring
@@ -198,7 +198,7 @@
 (defun py-complete-help (str1 &optional usetip)
   "get help on a python expression"
   (interactive "sHelp: \nP")
-  (let ((help-string (pycomplete-get-help str1)))
+  (let ((help-string (py-complete-get-help str1)))
     ;; (if (and help-string (> (length help-string) 300))
     ;;     (with-output-to-temp-buffer "*Python Help*"
     ;;       (print help-string))
@@ -264,8 +264,13 @@
   )
 
 (py-complete-init-keys python-mode-map)
-(py-complete-init-keys python-shell-map)
-(define-key python-shell-map "\C-i" 'py-complete)
+
+(if (and (not (boundp 'python-shell-map))
+         (boundp 'inferior-python-mode-map))
+  (setq  python-shell-map inferior-python-mode-map)) ;; Emacs 24 or fgallina's python.el
+(when (boundp 'python-shell-map)
+  (py-complete-init-keys python-shell-map)
+  (define-key python-shell-map "\C-i" 'py-complete))
 
 (eval-after-load "python-mode"
   `(progn
