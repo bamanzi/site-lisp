@@ -189,6 +189,14 @@
      (magit-header ((t (:foreground "#edd400"))))
      (magit-diff-add ((t (:foreground "#729fcf"))))
      (magit-item-highlight ((t (:weight extra-bold :inverse-video t))))
+
+     (help-argument-name ((t (:italic t :slant italic :foreground "blanched almond" :background "black" ))))
+     (which-func  ((t (:forground "cornflower blue"))))
+     ;;hideshowvis
+     (hs-face ((t (:background "brown4"))))
+     ;;info+
+     (info-string ((t (:foreground "#6ac214"))))
+     (info-quoted-name ((t (:foreground "#edd400"))))     
 )))
 
 (provide 'color-theme-tangotango)

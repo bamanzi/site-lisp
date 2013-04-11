@@ -1,8 +1,10 @@
-;;; dircmp-mode.el --- Compare and sync directories.
+;;; dircmp.el --- Compare and sync directories.
 
 ;; Copyright (C) 2012 Matt McClure
 
 ;; Author: Matt McClure -- http://matthewlmcclure.com
+;; URL: https://github.com/matthewlmcclure/dircmp-mode
+;; Version: 1
 ;; Keywords: unix, tools
 
 ;; dircmp-mode is free software: you can redistribute it and/or modify
@@ -22,15 +24,32 @@
 
 ;; Add to your Emacs startup file:
 ;;
-;;    (load "/path/to/dircmp.el")
+;;     (load "/path/to/dircmp.el")
 ;;
 ;; Then:
 ;;
-;;    M-x compare-directories RET dir1 RET dir2 RET
+;;     M-x compare-directories RET dir1 RET dir2 RET
 ;;
-;; The author uses dircmp-mode with git-diffall (https://github.com/thenigan/git-diffall) as follows:
+;; The author uses dircmp-mode with git-difftool's directory diff:
 ;;
-;;    git diffall -x /path/to/dircmp-mode/emacs-git-difftool.sh
+;;     git difftool -d
+;;
+;; You can configure Emacs with dircmp-mode as your default Git difftool
+;; by adding to your .gitconfig:
+;;
+;;     [difftool "emacs"]
+;;       cmd = /path/to/dircmp-mode/emacs-git-difftool.sh \"$LOCAL\" \"$REMOTE\"
+;;       prompt = false
+;;     [diff]
+;;       tool = emacs
+;;
+;; git-difftool first learned to do directory diffs in Git 1.7.11. With
+;; earlier versions of Git, you can add git-diffall from
+;; <https://github.com/thenigan/git-diffall> and use dircmp-mode as your
+;; git-diffall tool:
+;;
+;;     git diffall -x /path/to/dircmp-mode/emacs-git-difftool.sh
+;;
 
 ;;; Code:
 
@@ -231,6 +250,7 @@
     (set (make-local-variable 'dir1) normalized-dir1)
     (set (make-local-variable 'dir2) normalized-dir2)
     (compare-with-rsync dir1 dir2)
+    (refine-comparison-symlink-destinations)
     (refine-comparison-byte-by-byte)
     (refine-comparison-with-diff)
     (update-comparison-view dir1 dir2)))
@@ -265,6 +285,32 @@
 (defun dircmp-line-number ()
   (1+ (count-lines 1 (line-beginning-position))))
 
+(defun refine-comparison-symlink-destinations ()
+  (if (or
+       (equal (with-current-buffer comparison-view-buffer dircmp-compare-content) "size")
+       (equal (with-current-buffer comparison-view-buffer dircmp-compare-content) "checksum"))
+      (save-excursion
+        (set-buffer rsync-output-buffer)
+        (goto-char (point-min))
+        (let ((lines (count-lines (point-min) (point-max))))
+          (while (<= (dircmp-line-number) lines)
+            (progn
+              (if
+                  (and
+                   (or (path1-symlink-p) (path2-symlink-p))
+                   ;; If file2 is a symlink, rsync reports it needs
+                   ;; overwriting regardless of its contents.
+                   (string-equal ">f+++++++" (substring (comparison-on-current-rsync-line) 0 9)))
+                  (let ((equivalent
+                         (equal 0 (call-process
+                                   "cmp" nil nil nil "-s" (path1-on-current-rsync-line) (path2-on-current-rsync-line)))))
+                    (if (not equivalent)
+                        (progn
+                          (goto-char (+ (line-beginning-position) 2))
+                          (delete-char 2)
+                          (insert "c.")))))
+              (forward-line)))))))
+
 (defun refine-comparison-byte-by-byte ()
   (if (equal (with-current-buffer comparison-view-buffer dircmp-compare-content) "byte by byte")
       (save-excursion
@@ -275,8 +321,13 @@
             (progn
               (if (and
                    (string-equal "f" (substring (comparison-on-current-rsync-line) 1 2))
-                   (string-equal "." (substring (comparison-on-current-rsync-line) 2 3))
-                   (string-equal "." (substring (comparison-on-current-rsync-line) 3 4)))
+                   (or
+                    (and
+                     (string-equal "." (substring (comparison-on-current-rsync-line) 2 3))
+                     (string-equal "." (substring (comparison-on-current-rsync-line) 3 4)))
+                    (and
+                     (string-equal " " (substring (comparison-on-current-rsync-line) 2 3))
+                     (string-equal " " (substring (comparison-on-current-rsync-line) 3 4)))))
                   (let ((equivalent
                          (equal 0 (call-process
                                    "cmp" nil nil nil "-s" (path1-on-current-rsync-line) (path2-on-current-rsync-line)))))
@@ -430,22 +481,32 @@ Key:
 (defun path1-on-current-rsync-line ()
   (save-excursion
     (switch-to-buffer rsync-output-buffer)
-    (concat dir1 (file-on-current-rsync-line))))
+    (file-truename (concat dir1 (file-on-current-rsync-line)))))
 
 (defun path2-on-current-rsync-line ()
   (save-excursion
     (switch-to-buffer rsync-output-buffer)
-    (concat dir2 (file-on-current-rsync-line))))
+    (file-truename (concat dir2 (file-on-current-rsync-line)))))
 
 (defun path1-on-current-view-line ()
   (save-excursion
     (switch-to-buffer rsync-output-buffer)
-    (concat dir1 (file-on-current-view-line))))
+    (file-truename (concat dir1 (file-on-current-view-line)))))
 
 (defun path2-on-current-view-line ()
   (save-excursion
     (switch-to-buffer rsync-output-buffer)
-    (concat dir2 (file-on-current-view-line))))
+    (file-truename (concat dir2 (file-on-current-view-line)))))
+
+(defun path1-symlink-p ()
+  (save-excursion
+    (switch-to-buffer rsync-output-buffer)
+    (file-symlink-p (concat dir1 (file-on-current-rsync-line)))))
+
+(defun path2-symlink-p ()
+  (save-excursion
+    (switch-to-buffer rsync-output-buffer)
+    (file-symlink-p (concat dir2 (file-on-current-rsync-line)))))
 
 (defun format-rsync-output (rsync-output)
   (progn
@@ -477,6 +538,10 @@ Key:
            "2......")
           ((string-equal ">f+++++++" (substring padded-comparison 0 9))
            "1......")
+          ;; rsync reported copy needed and a refinement indicated the
+          ;; contents differ.
+          ((string-equal ">fc.+++++" (substring padded-comparison 0 9))
+           "c......")
           ((string-equal "c" (substring padded-comparison 0 1))
            "1......")
           ((or (string-equal "c" (substring padded-comparison 2 3))
@@ -487,3 +552,5 @@ Key:
           )))
 
 (provide 'dircmp-mode)
+
+;;; dircmp.el ends here
