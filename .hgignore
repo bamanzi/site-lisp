@@ -6,3 +6,5 @@ syntax: glob
 *.bak
 Thumb.db
 site-lisp/packages/org/
+*\#
+*~
