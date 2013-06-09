@@ -18,7 +18,7 @@
 
 ;; Author: zk_phi
 ;; URL: http://hins11.yu-yake.com/
-;; Version: 1.0.4
+;; Version: 2.0.2
 
 ;;; Commentary:
 
@@ -26,19 +26,23 @@
 ;;
 ;;   (require 'indent-guide)
 ;;
-;; then indent-guide appears automatically.
+;; and call command "indent-guide-mode".
 
-;; To set delay until the indent-guide appears, use function
-;; "indent-guide-set-delay".
+;; If you want to enable indent-guide-mode in all buffers,
+;; set the default value of "indent-guide-mode" non-nil.
 ;;
-;;   (indent-guide-set-delay 1.0)
+;;   (setq-default indent-guide-mode t)
 ;;
-;; Now indent-guide appears after 1.0 sec of idle time.
+;; in your init file.
 
-;; Column lines are applied "indent-guide-face". So you may configure
-;; this face to make liens more pretty in your colorscheme.
+;; Column lines are propertized with "indent-guide-face". So you may
+;; configure this face to make guides more pretty in your colorscheme.
 ;;
 ;;   (set-face-background 'indent-guide-face "dimgray")
+;;
+;; You may also change the character for guides.
+;;
+;;   (setq indent-guide-char ":")
 
 ;;; Change Log:
 
@@ -48,14 +52,18 @@
 ;; 1.0.2 modified behavior for lines with only whitespaces
 ;; 1.0.3 Allow custom indent guide char
 ;; 1.0.4 disabled in org-indent-mode
-
-;;; Known limitations, bugs:
-
-;; o works not perfectly with "hl-line".
+;; 1.0.5 faster update of indent-guide (especially for huge files)
+;; 1.1.0 work with tab-indented files
+;; 1.1.1 turned into minor-mode
+;; 1.1.2 an infinite-loop bug fix
+;; 1.1.3 changed behavior for blank lines
+;; 2.0.0 rewrite almost everything
+;; 2.0.1 improve blank-line and tab handling
+;; 2.0.2 fixed bug that sometimes newline gets invisible
 
 ;;; Code:
 
-(defconst indent-guide-version "1.0.4")
+(defconst indent-guide-version "2.0.2")
 
 ;; * customs
 
@@ -67,136 +75,99 @@
   "character used as vertical line"
   :group 'indent-guide)
 
-;; * variables / faces
+;; * minor-mode
 
-(defvar indent-guide-timer-object
-  (run-with-idle-timer 0.6 t 'indent-guide-update))
+(defvar indent-guide-mode nil)
+(make-variable-buffer-local 'indent-guide-mode)
+
+(defun indent-guide-mode (&optional arg)
+  (interactive)
+  (setq indent-guide-mode (if arg (< arg 0)
+                            (not indent-guide-mode)))
+  (message (if indent-guide-mode
+               "indent-guide-mode enabled"
+             "indent-guide-mode disabled")))
+
+(when (not (assq 'indent-guide-mode minor-mode-alist))
+  (setq minor-mode-alist (cons '(indent-guide-mode " Ingd") minor-mode-alist)))
+
+;; * variables / faces
 
 (make-face 'indent-guide-face)
 (set-face-attribute 'indent-guide-face nil
                     :foreground "#535353")
 
-(defun indent-guide-set-delay (sec)
-  "change delay until the indent-guide appears"
-  (timer-set-idle-time indent-guide-timer-object
-                       sec t))
+;; * utilities
 
-;; * private functions
-
-(defun indent-guide--indent-list (beg end)
-  (save-excursion
-    (let ((lst nil))
-      (goto-char end)
-      (beginning-of-line)
-      (while (< beg (point))
-        (setq lst (cons
-                   (if (eolp) nil
-                     (progn (back-to-indentation) (current-column)))
-                   lst))
-        (vertical-motion -1))
-      (back-to-indentation)
-      (setq lst (cons (current-column) lst)))))
-
-(defun indent-guide--guide-strings (indent-list)
-  (flet ((set-nth (n lst val)
-                  (if (zerop n)
-                      (setcar lst val)
-                    (set-nth (1- n) (cdr lst) val)))
-         (guides (indent-list)
-                 (let ((active nil)
-                       (coming indent-list)
-                       (guides nil))
-                   (dotimes (n (length indent-list))
-                     (let ((current (car coming)))
-                       (if (null current)
-                           (setq guides (cons active guides))
-                         (setq active (delq nil
-                                            (mapcar (lambda (x) (and (< x current) x))
-                                                    active)))
-                         (setq guides (cons active guides))
-                         (add-to-list 'active current t))
-                       (setq coming (cdr coming))))
-                   (reverse guides)))
-         (guide-string (guide)
-                       (if (null guide) ""
-                         (let* ((length (1+ (eval `(max ,@guide))))
-                                (str (make-list length " ")))
-                           (dolist (n guide)
-                             (set-nth n str indent-guide-char))
-                           (eval `(concat ,@str))))))
-    (let ((guides (guides indent-list)))
-      (mapcar 'guide-string guides))))
-
-;; * show or hide indent-guides
-
-(defun indent-guide-overlays (beg end)
+(defun indent-guide--active-overlays ()
   (delq nil
         (mapcar
          (lambda (ov)
            (and (eq (overlay-get ov 'category) 'indent-guide) ov))
-         (overlays-in beg end))))
+         (overlays-in (point-min) (point-max)))))
 
-(defun indent-guide-show (beg end)
-  (unless (indent-guide-overlays beg end)
-    (save-excursion
-      (let* ((indent-list (indent-guide--indent-list beg end))
-             (string-list (indent-guide--guide-strings indent-list))
-             ov)
-        (goto-char beg)
-        (dotimes (n (1- (length indent-list)))
-          (setq indent-list (cdr indent-list)
-                string-list (cdr string-list))
-          (cond ((null (car indent-list))
-                 (vertical-motion 1)
-                 (if (eolp)
-                     (setq ov (make-overlay (point) (1+ (point))))
-                   (setq ov (make-overlay (point) (point-at-eol)))
-                   (overlay-put ov 'invisible t)))
-                (t
-                 (vertical-motion (cons (length (car string-list)) 1))
-                 (setq ov (make-overlay (point-at-bol) (point)))
-                 (overlay-put ov 'invisible t)))
-          (overlay-put ov 'category 'indent-guide)
-          (overlay-put ov 'before-string
-                       (propertize (car string-list) 'face 'indent-guide-face)))))))
+;; * generate guides
 
-(defun indent-guide-remove (beg end)
-  (dolist (ov (indent-guide-overlays beg end))
-    (delete-overlay ov)))
+(defun indent-guide--draw-line (col)
+  "draw \"indent-guide-char\" at the COLUMN in this line"
+  (save-excursion
+    (move-to-column col)
+    (let ((diff (- (current-column) col))
+          string ov)
+      (cond ((eolp)                     ; blank line (with or without indent)
+             (setq string (concat (make-string (- diff) ?\s)
+                                  indent-guide-char))
+             (setq ov (make-overlay (point) (point))))
+            ((not (zerop diff))         ; looking back tab (unexpectedly)
+             (setq string (concat (make-string (- tab-width diff) ?\s)
+                                  indent-guide-char
+                                  (make-string (1- diff) ?\s)))
+             (setq ov (make-overlay (1- (point)) (point))))
+            ((looking-at "\t")          ; looking at tab
+             (setq string (concat indent-guide-char
+                                  (make-string (1- tab-width) ?\s)))
+             (setq ov (make-overlay (point) (1+ (point)))))
+            (t                          ; no problem
+             (setq string indent-guide-char)
+             (setq ov (make-overlay (point) (1+ (point))))))
+      (overlay-put ov 'invisible t)
+      (overlay-put ov 'category 'indent-guide)
+      (overlay-put ov 'before-string
+                   (propertize string 'face 'indent-guide-face)))))
+
+(defun indent-guide-show ()
+  (when indent-guide-mode
+   (unless (or (indent-guide--active-overlays)
+               (active-minibuffer-window))
+     (save-excursion
+       (let ((start (window-start))
+             (end (window-end))
+             (ind-col (progn (back-to-indentation) (current-column)))
+             line-col)
+         (unless (zerop ind-col)
+           ;; search column
+           (while (and (zerop (forward-line -1))
+                       (progn (back-to-indentation) t)
+                       (or (<= ind-col (current-column)) (eolp))))
+           (setq line-col (current-column))
+           ;; draw line
+           (while (and (zerop (forward-line 1))
+                       (< (point) start)))
+           (while (and (progn (back-to-indentation) t)
+                       (or (< line-col (current-column)) (eolp))
+                       (indent-guide--draw-line line-col)
+                       (progn (forward-line 1) (not (eobp)))
+                       (<= (point) end)))))))))
+
+(defun indent-guide-remove ()
+  (when indent-guide-mode
+    (dolist (ov (indent-guide--active-overlays))
+      (delete-overlay ov))))
 
 ;; * triggers
 
-(defun indent-guide-beginning-of-defun ()
-  (or (search-backward-regexp "^[^\s\t\n]" nil t)
-      (goto-char (point-min))))
-
-(defun indent-guide-end-of-defun ()
-  (or (and (ignore-errors (forward-char) t)
-           (or (search-forward-regexp "^[^\s\t\n]" nil t)
-               (goto-char (point-max)))
-           (or (search-backward-regexp "^[\s\t]" nil t)
-               (goto-char (point-min)))
-           (progn (end-of-line) (point)))
-      (goto-char (point-max))))
-
-(defun indent-guide-update ()
-  (unless (or (and (boundp 'org-indent-mode) org-indent-mode)
-              (active-minibuffer-window))
-    (save-excursion
-      (ignore-errors (forward-char))        ; *FIXME*
-      (let* ((beg (indent-guide-beginning-of-defun))
-             (end (indent-guide-end-of-defun)))
-        (indent-guide-show beg end)))))
-
-(defun indent-guide-pre-command ()
-  (save-excursion
-    ;; (ignore-errors (forward-char))        ; *FIXME*
-    ;; (let* ((beg (indent-guide-beginning-of-defun))
-    ;;        (end (indent-guide-end-of-defun)))
-    ;;   (indent-guide-remove beg end))
-    (indent-guide-remove (point-min) (point-max))))
-
-(add-hook 'pre-command-hook 'indent-guide-pre-command)
+(add-hook 'pre-command-hook 'indent-guide-remove)
+(add-hook 'post-command-hook 'indent-guide-show)
 
 ;; * provide
 
